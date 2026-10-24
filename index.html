@@ -53,6 +53,9 @@
           color: #fff; font-size: 1.2rem; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
   .tool:hover { background: rgba(20,14,30,.65); }
   .tool.dim { opacity: .5; }
+  /* 弹窗模式（PPT 按钮用 ?popup=1 打开）：右上角多一个“回到课件” */
+  .back { display: none; height: 2.6rem; padding: 0 1rem; border-radius: 1.3rem; border: 0; background: var(--red); color: #fff8ee; font-size: 1rem; letter-spacing: .05em; }
+  body.popup .back { display: block; }
 
   /* 提问牌 + 气泡 */
   .stage { position: fixed; left: calc(2vw + var(--hw) - 1.5rem); right: 2.2rem; bottom: 8.6rem; z-index: 3;
@@ -143,6 +146,7 @@
   <button class="tool" id="voiceBtn" title="声音开关">🔊</button>
   <button class="tool" id="histBtn" title="对话记录">📜</button>
   <button class="tool" id="gear" title="设置（老师用）">⚙</button>
+  <button class="back" id="backBtn" title="关闭窗口，回到 PPT（Esc）">✕ 回到课件</button>
 </div>
 
 <div class="stage">
@@ -579,9 +583,23 @@
       })
       .catch(function (e) { $("st").textContent = "大模型没连上：" + friendly(e); });
   };
+  // 弹窗模式：PPT 放映时点按钮用 Edge --app 打开 ?popup=1，窗口自己居中，Esc 或按钮关窗回到放映
+  var popup = /[?&]popup=1/.test(location.search);
+  if (popup) {
+    document.body.classList.add("popup");
+    try {
+      var w = Math.round(screen.availWidth * .78), h = Math.round(screen.availHeight * .82);
+      window.resizeTo(w, h); window.moveTo(Math.round((screen.availWidth - w) / 2), Math.round((screen.availHeight - h) / 2));
+    } catch (e) {}
+  }
+  $("backBtn").onclick = function () { window.close(); };
   document.addEventListener("keydown", function (e) {
     if (e.ctrlKey && e.key === ",") $("gear").click();
-    if (e.key === "Escape") { $("close").click(); $("histClose").click(); }
+    if (e.key === "Escape") {
+      var open = $("mask").className.indexOf("on") >= 0 || $("drawer").className.indexOf("on") >= 0;
+      $("close").click(); $("histClose").click();
+      if (popup && !open && document.activeElement !== $("q")) window.close();
+    }
   });
 })();
 </script>
