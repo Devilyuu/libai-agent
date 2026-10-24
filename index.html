@@ -1,0 +1,589 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>和李白聊一聊</title>
+<style>
+  /* 人物形象智能体：李白站在画面里，回答以气泡出现，开口说话时嘴巴跟着声音动。
+     人物设定在 agent.js；大模型和语音的钥匙点右上角齿轮填一次，存在这台电脑的浏览器里。
+     1rem 随画面大小缩放，放进 PPT 的网页框里也够大。旧版“对话卷”界面在 chat.html。 */
+  @font-face { font-family: "WenKai"; src: url(wenkai.woff2) format("woff2"); font-display: swap; }
+  @font-face { font-family: "MaShan"; src: url(mashan.woff2) format("woff2"); font-display: swap; }
+  /* --hh 人物高度、--hw 人物宽度、--my 气泡尖角离底边的比例（对准嘴巴） */
+  :root { --hh: 90vh; --hw: calc(var(--hh) * 400 / 620); --my: .62; }
+  body.imghero { --hw: calc(var(--hh) * 2 / 3); --my: .73; }
+  :root { --ink: #2a2118; --ink2: #6b5a45; --red: #b8322a; --red-rgb: 184,50,42; --blue: #3d5a9e; --blue-rgb: 61,90,158;
+          --ui: "WenKai", "KaiTi", "STKaiti", "楷体", serif; }
+  * { box-sizing: border-box; }
+  html { font-size: clamp(14px, 2.6vh, 32px); }
+  @media (max-aspect-ratio: 16/10) { html { font-size: clamp(14px, 1.6vw, 32px); } }
+  html, body { margin: 0; height: 100%; overflow: hidden; }
+  body { font-family: var(--ui); color: var(--ink); background: #1d1a2b url(bg.jpg) center / cover no-repeat; user-select: none; -webkit-user-select: none; }
+  button, input, select { font-family: var(--ui); }
+  button { cursor: pointer; }
+  .shade { position: fixed; inset: 0; pointer-events: none;
+           background: linear-gradient(90deg, rgba(20,14,30,0) 0%, rgba(20,14,30,.15) 35%, rgba(20,14,30,.45) 100%); }
+
+  /* 人物 */
+  #hero { position: fixed; left: 2vw; bottom: 0; height: var(--hh); width: var(--hw); z-index: 2; pointer-events: none;
+          filter: drop-shadow(0 1.2rem 1.6rem rgba(10,5,20,.45)); }
+  #hero svg, #hero .imgs { width: 100%; height: 100%; display: block; }
+  #hero .imgs { position: relative; animation: breathe 4.2s ease-in-out infinite; transform-origin: 50% 100%; }
+  #hero .imgs img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; object-position: bottom; opacity: 0; }
+  #hero .imgs img.on { opacity: 1; }
+  #hero .body { animation: breathe 4.2s ease-in-out infinite; transform-box: view-box; transform-origin: 200px 620px; }
+  #hero .head { transform-box: view-box; transform-origin: 200px 300px; transition: transform .6s ease; }
+  #hero .tails { animation: sway 5s ease-in-out infinite; transform-box: view-box; transform-origin: 200px 160px; }
+  body.talking #hero .head { animation: nod 1.6s ease-in-out infinite; }
+  body.thinking #hero .head { transform: rotate(-5deg) translateY(2px); }
+  body.talking #hero .imgs { animation: talkbob 1.8s ease-in-out infinite; }
+  body.thinking #hero .imgs { animation: none; transform: rotate(-1deg); transition: transform .6s; }
+  @keyframes talkbob { 25% { transform: rotate(.5deg) translateY(-.3%); } 75% { transform: rotate(-.4deg); } }
+  @keyframes breathe { 50% { transform: translateY(-.35%) scale(1.008); } }
+  @keyframes sway { 50% { transform: rotate(2.5deg); } }
+  @keyframes nod { 25% { transform: rotate(1.6deg); } 75% { transform: rotate(-1.2deg); } }
+
+  /* 名牌、工具 */
+  .who { position: fixed; left: 2rem; top: 1.6rem; z-index: 3; color: #fff; display: flex; align-items: baseline; gap: .8rem; }
+  .who b { font-family: "MaShan", var(--ui); font-weight: 400; font-size: 2.4rem; letter-spacing: .12em; text-shadow: 0 .15rem .8rem rgba(20,5,30,.75); }
+  .who span { font-size: .9rem; padding: .12rem .65rem; border-radius: 1rem; background: rgba(0,0,0,.38); border: 1px solid rgba(255,255,255,.35); }
+  .tools { position: fixed; right: 1.6rem; top: 1.4rem; z-index: 4; display: flex; gap: .5rem; }
+  .tool { width: 2.6rem; height: 2.6rem; border-radius: 50%; border: 1px solid rgba(255,255,255,.4); background: rgba(20,14,30,.4);
+          color: #fff; font-size: 1.2rem; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+  .tool:hover { background: rgba(20,14,30,.65); }
+  .tool.dim { opacity: .5; }
+
+  /* 提问牌 + 气泡 */
+  .stage { position: fixed; left: calc(2vw + var(--hw) - 1.5rem); right: 2.2rem; bottom: 8.6rem; z-index: 3;
+           top: min(calc(100vh - var(--hh) * var(--my) - 1.8rem), 38vh);
+           display: flex; flex-direction: column; align-items: flex-start; pointer-events: none; }
+  #asked { position: absolute; right: 0; bottom: calc(100% + .8rem); max-width: 80%; padding: .45rem 1.1rem; border-radius: 1.4rem 1.4rem .3rem 1.4rem; background: var(--blue); color: #fff;
+           font-size: 1.15rem; box-shadow: 0 .4rem 1.2rem rgba(10,10,40,.35); opacity: 0; transform: translateY(.5rem); transition: .3s; }
+  #asked.on { opacity: 1; transform: none; }
+  #asked i { font-style: normal; opacity: .75; margin-right: .3rem; }
+  #bubble { position: relative; max-width: 100%; min-width: 12rem; min-height: 4.6rem; max-height: 100%; overflow-y: auto; pointer-events: auto;
+            padding: 1.1rem 1.6rem 1.2rem; border-radius: 1.6rem; background: linear-gradient(180deg, #fffdf6, #f6eedc);
+            border: 2px solid rgba(140,105,60,.35); box-shadow: 0 1.2rem 3rem rgba(15,5,25,.45);
+            font-size: 1.5rem; line-height: 1.75; white-space: pre-wrap; word-break: break-word; cursor: pointer; scrollbar-width: none; }
+  #bubble::-webkit-scrollbar { display: none; }
+  #bubble.pop { animation: pop .35s ease-out; }
+  @keyframes pop { from { opacity: 0; transform: scale(.94) translateX(-1rem); } to { opacity: 1; transform: none; } }
+  .tail { position: absolute; z-index: 3; width: 2.2rem; height: 2.2rem; pointer-events: none;
+          left: calc(2vw + var(--hw) - 2.9rem); top: calc(min(calc(100vh - var(--hh) * var(--my) - 1.8rem), 38vh) + 1rem); }
+  .tail::before { content: ""; position: absolute; inset: 0; background: #fbf6ea; border-left: 2px solid rgba(140,105,60,.35); border-bottom: 2px solid rgba(140,105,60,.35);
+          transform: skewY(-28deg) rotate(18deg); border-radius: 0 0 0 .5rem; }
+  #bubble .who2 { display: block; font-size: .85rem; color: var(--ink2); margin-bottom: .2rem; }
+  #bubble.err { background: #fff4ef; color: #7a2a20; }
+  .cursor { display: inline-block; width: .5em; height: .95em; margin-left: .1em; vertical-align: -.1em; border-radius: 40% 60% 50% 50%;
+            background: var(--ink); animation: blink 1s steps(2) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .thinking { display: inline-flex; gap: .4rem; padding: .5rem 0; }
+  .thinking i { width: .6rem; height: .6rem; border-radius: 50%; background: var(--ink2); opacity: .3; animation: ink 1.2s infinite; }
+  .thinking i:nth-child(2) { animation-delay: .2s; } .thinking i:nth-child(3) { animation-delay: .4s; }
+  @keyframes ink { 30% { opacity: 1; transform: translateY(-.25rem); } }
+  .replay { position: absolute; right: .9rem; bottom: .5rem; font-size: .8rem; color: var(--ink2); opacity: .6; }
+
+  /* 底部：快捷提问 + 输入 */
+  .dock { position: fixed; left: calc(2vw + var(--hw) - 1.5rem); right: 2.2rem; bottom: 1.4rem; z-index: 4; }
+  .chips { display: flex; gap: .55rem; margin-bottom: .7rem; overflow-x: auto; scrollbar-width: none; }
+  .chips::-webkit-scrollbar { display: none; }
+  .chip { flex: none; white-space: nowrap; border: 1px solid rgba(255,255,255,.55); background: rgba(255,250,240,.82); color: var(--red); border-radius: 2rem;
+          padding: .3rem .9rem; font-size: .95rem; box-shadow: 0 .3rem .8rem rgba(10,5,20,.25); transition: transform .15s, background .15s; }
+  .chip:hover { background: #fff; transform: translateY(-1px); }
+  .chip:disabled { opacity: .5; transform: none; cursor: default; }
+  .ask { display: flex; gap: .7rem; padding: .55rem; border-radius: 1.4rem; background: rgba(255,250,240,.92); box-shadow: 0 .8rem 2rem rgba(10,5,20,.4); }
+  #q { flex: 1; min-width: 0; font-size: 1.3rem; padding: .55rem 1rem; border-radius: 1rem; border: 2px solid transparent; background: transparent; color: var(--ink); outline: none; user-select: text; -webkit-user-select: text; }
+  #q:focus { border-color: rgba(var(--red-rgb),.4); background: #fff; }
+  #send { flex: none; font-size: 1.3rem; padding: 0 1.4rem; border: 0; border-radius: 1rem; color: #fff8ee; letter-spacing: .1em;
+          background: linear-gradient(180deg, #cf4136, var(--red)); box-shadow: 0 .3rem .9rem rgba(var(--red-rgb),.4); }
+  #send:disabled { opacity: .5; cursor: default; }
+  .foot { position: fixed; right: 2.2rem; bottom: .25rem; z-index: 4; font-size: .7rem; color: rgba(255,255,255,.7); text-shadow: 0 1px 3px rgba(0,0,0,.7); }
+
+  /* 对话记录 */
+  .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(30rem, 90vw); z-index: 8; background: #f7f0e1; box-shadow: -1rem 0 3rem rgba(0,0,0,.4);
+            transform: translateX(105%); transition: transform .3s; display: flex; flex-direction: column; }
+  .drawer.on { transform: none; }
+  .drawer h3 { margin: 0; padding: 1rem 1.3rem; font-family: "MaShan", var(--ui); font-weight: 400; font-size: 1.6rem; border-bottom: 1px dashed rgba(120,90,50,.35);
+               display: flex; justify-content: space-between; align-items: center; }
+  .drawer h3 button { border: 0; background: none; font-size: 1.2rem; color: var(--ink2); }
+  #hist { flex: 1; overflow-y: auto; padding: 1rem 1.3rem; font-size: 1rem; line-height: 1.6; user-select: text; -webkit-user-select: text; }
+  #hist .q { color: var(--blue); margin-top: .8rem; } #hist .a { margin: .2rem 0 0; }
+
+  /* 设置（老师用） */
+  .mask { position: fixed; inset: 0; z-index: 9; background: rgba(15,10,25,.6); display: none; align-items: center; justify-content: center; }
+  .mask.on { display: flex; }
+  .dlg { width: min(94vw, 38rem); max-height: 94vh; overflow-y: auto; background: #f7f0e1; border-radius: 1.2rem; padding: 1.3rem 1.6rem; box-shadow: 0 2rem 5rem rgba(0,0,0,.5); font-size: .95rem; }
+  .dlg h3 { margin: 0 0 .3rem; font-family: "MaShan", var(--ui); font-weight: 400; font-size: 1.6rem; }
+  .dlg h4 { margin: 1.1rem 0 0; font-size: 1.05rem; color: var(--red); border-top: 1px dashed rgba(120,90,50,.35); padding-top: .8rem; }
+  .dlg p.note { margin: 0 0 .6rem; color: var(--ink2); font-size: .85rem; line-height: 1.6; }
+  .dlg label { display: block; margin: .6rem 0 .25rem; font-size: .9rem; color: var(--ink2); }
+  .dlg label.inline { display: flex; align-items: center; gap: .5rem; color: var(--ink); }
+  .dlg input:not([type=checkbox]), .dlg select { width: 100%; font-size: .95rem; padding: .45rem .7rem; border-radius: .6rem; border: 1px solid rgba(120,90,50,.4); background: #fff; user-select: text; -webkit-user-select: text; }
+  .dlg .row { display: flex; gap: .6rem; margin-top: 1.1rem; flex-wrap: wrap; }
+  .dlg .row button { font-size: .95rem; padding: .45rem 1.05rem; border-radius: .7rem; border: 1px solid rgba(120,90,50,.4); background: #fff; }
+  .dlg .row button.main { background: var(--red); color: #fff; border-color: transparent; }
+  #st { margin-top: .8rem; font-size: .88rem; min-height: 1.4em; color: var(--ink2); white-space: pre-wrap; }
+
+  /* 窄框：人物缩小靠左下，气泡和输入占右边 */
+  @media (max-aspect-ratio: 4/3) {
+    :root { --hh: 62vh; }
+    #hero { left: 0; }
+    .stage, .dock { left: calc(var(--hw) - 1rem); }
+    .tail { left: calc(var(--hw) - 2.4rem); }
+  }
+</style>
+</head>
+<body>
+<div class="shade"></div>
+<div id="hero"></div>
+
+<div class="who"><b id="title">诗仙李白</b><span id="tag">AI 扮演</span></div>
+<div class="tools">
+  <button class="tool" id="voiceBtn" title="声音开关">🔊</button>
+  <button class="tool" id="histBtn" title="对话记录">📜</button>
+  <button class="tool" id="gear" title="设置（老师用）">⚙</button>
+</div>
+
+<div class="stage">
+  <div id="asked"><i>小朋友问：</i><span></span></div>
+  <div id="bubble"></div>
+</div>
+<div class="tail"></div>
+
+<div class="dock">
+  <div class="chips" id="chips"></div>
+  <form class="ask" id="form" autocomplete="off">
+    <input id="q" maxlength="200">
+    <button id="send" type="submit">问李白</button>
+  </form>
+</div>
+<div class="foot" id="foot"></div>
+
+<aside class="drawer" id="drawer">
+  <h3>对话记录 <button id="histClose">✕</button></h3>
+  <div id="hist"></div>
+</aside>
+
+<div class="mask" id="mask">
+  <div class="dlg">
+    <h3>设置（老师用，填一次就行）</h3>
+    <p class="note">钥匙只存在这台电脑的浏览器里，不会写进网页文件。学生打开就能直接聊。没有钥匙？看《开通说明》。</p>
+    <h4>大脑：大模型</h4>
+    <label>平台</label>
+    <select id="prov">
+      <option value="ark">火山方舟 · 豆包</option>
+      <option value="deepseek">DeepSeek</option>
+      <option value="qwen">阿里云百炼 · 通义千问</option>
+      <option value="custom">其他（OpenAI 兼容接口）</option>
+    </select>
+    <label>接口地址</label><input id="url">
+    <label>模型名称（Model ID）</label><input id="model">
+    <label>API Key</label><input id="key" type="password" placeholder="粘贴到这里">
+    <h4>声音：火山引擎语音合成</h4>
+    <label class="inline"><input type="checkbox" id="voiceOn"> 让人物开口说话</label>
+    <label>语音 API Key（豆包语音控制台 → API Key 管理）</label><input id="ttsKey" type="password" placeholder="粘贴到这里">
+    <label>音色 ID</label><input id="speaker">
+    <label>语音接口地址</label><input id="ttsUrl">
+    <div class="row">
+      <button class="main" id="save">保存</button>
+      <button id="test">测试一下</button>
+      <button id="clear">清空对话</button>
+      <button id="close">关闭</button>
+    </div>
+    <div id="st"></div>
+  </div>
+</div>
+
+<template id="libaiSvg">
+<svg viewBox="0 0 400 620" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="gRobe" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fdfaf3"/><stop offset="1" stop-color="#dfe2e6"/></linearGradient>
+    <linearGradient id="gSleeve" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f7f4ec"/><stop offset="1" stop-color="#d6dade"/></linearGradient>
+    <radialGradient id="gFace" cx=".5" cy=".42" r=".62"><stop offset="0" stop-color="#fde6d0"/><stop offset="1" stop-color="#eec6a3"/></radialGradient>
+  </defs>
+  <g class="body">
+    <g class="tails">
+      <path d="M152 150 C112 172 96 232 82 300 C94 303 103 300 111 295 C121 240 135 192 162 166 Z" fill="#1f1c25"/>
+      <path d="M248 150 C288 172 304 232 318 300 C306 303 297 300 289 295 C279 240 265 192 238 166 Z" fill="#1f1c25"/>
+    </g>
+    <path d="M118 332 C140 306 170 297 200 297 C230 297 260 306 282 332 C322 382 346 470 362 620 L38 620 C54 470 78 382 118 332 Z" fill="url(#gRobe)" stroke="#c9c6bd" stroke-width="2"/>
+    <path d="M200 326 C214 380 240 420 264 452" fill="none" stroke="#cfccc3" stroke-width="3"/>
+    <path d="M94 470 C160 486 240 486 306 470 L309 493 C240 509 160 509 91 493 Z" fill="#b8322a"/>
+    <path d="M118 334 C82 372 68 442 90 522 C122 548 176 548 206 522 C196 480 170 430 150 382 Z" fill="url(#gSleeve)" stroke="#c9c6bd" stroke-width="2"/>
+    <path d="M282 334 C318 372 332 442 310 522 C278 548 224 548 194 522 C204 480 230 430 250 382 Z" fill="url(#gSleeve)" stroke="#c9c6bd" stroke-width="2"/>
+    <path d="M96 517 C126 537 176 537 204 519" fill="none" stroke="#4b6c8f" stroke-width="7" stroke-linecap="round"/>
+    <path d="M304 517 C274 537 224 537 196 519" fill="none" stroke="#4b6c8f" stroke-width="7" stroke-linecap="round"/>
+    <g>
+      <rect x="146" y="496" width="108" height="18" rx="3" fill="#f3e3bd" stroke="#b99a62" stroke-width="2"/>
+      <rect x="138" y="492" width="10" height="26" rx="4" fill="#7a4a2a"/><rect x="252" y="492" width="10" height="26" rx="4" fill="#7a4a2a"/>
+      <path d="M160 505 H240" stroke="#c8ae7c" stroke-width="2" stroke-dasharray="6 5"/>
+    </g>
+    <circle cx="276" cy="548" r="9" fill="#86bca0" stroke="#4d8a6c" stroke-width="2"/>
+    <path d="M276 557 V600" stroke="#b8322a" stroke-width="3"/>
+    <path d="M164 300 C174 332 226 332 236 300" fill="none" stroke="#4b6c8f" stroke-width="10" stroke-linecap="round"/>
+    <g class="head">
+      <rect x="182" y="268" width="36" height="42" rx="12" fill="#eec6a3"/>
+      <ellipse cx="124" cy="224" rx="12" ry="18" fill="#eec6a3"/><ellipse cx="276" cy="224" rx="12" ry="18" fill="#eec6a3"/>
+      <ellipse cx="200" cy="216" rx="78" ry="86" fill="url(#gFace)"/>
+      <path d="M124 196 C120 166 138 146 160 140 L152 208 C142 218 130 216 124 206 Z" fill="#1f1c25"/>
+      <path d="M276 196 C280 166 262 146 240 140 L248 208 C258 218 270 216 276 206 Z" fill="#1f1c25"/>
+      <path d="M128 178 C150 150 250 150 272 178 C258 164 142 164 128 178 Z" fill="#1f1c25"/>
+      <ellipse cx="200" cy="98" rx="50" ry="36" fill="#2b2831"/>
+      <path d="M126 170 C120 112 160 84 200 84 C240 84 280 112 274 170 C240 158 160 158 126 170 Z" fill="#26232c"/>
+      <path d="M126 170 C160 158 240 158 274 170 L272 181 C240 169 160 169 128 181 Z" fill="#111015"/>
+      <path d="M150 194 C162 183 178 181 191 187" stroke="#1f1c25" stroke-width="7" stroke-linecap="round" fill="none"/>
+      <path d="M250 194 C238 183 222 181 209 187" stroke="#1f1c25" stroke-width="7" stroke-linecap="round" fill="none"/>
+      <g class="eyes-open">
+        <ellipse cx="170" cy="216" rx="9" ry="11" fill="#1f1c25"/><circle cx="173" cy="211" r="3.2" fill="#fff"/>
+        <ellipse cx="230" cy="216" rx="9" ry="11" fill="#1f1c25"/><circle cx="233" cy="211" r="3.2" fill="#fff"/>
+      </g>
+      <g class="eyes-shut" style="display:none" stroke="#1f1c25" stroke-width="4" stroke-linecap="round" fill="none">
+        <path d="M160 217 C165 224 175 224 180 217"/><path d="M220 217 C225 224 235 224 240 217"/>
+      </g>
+      <ellipse cx="150" cy="242" rx="13" ry="7" fill="#f28b82" opacity=".35"/><ellipse cx="250" cy="242" rx="13" ry="7" fill="#f28b82" opacity=".35"/>
+      <path d="M200 227 C197 237 199 241 205 241" stroke="#c99a7a" stroke-width="3" fill="none" stroke-linecap="round"/>
+      <path class="smile" d="M187 265 C195 273 205 273 213 265" stroke="#8a3b2e" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+      <g class="mouth" style="display:none"><ellipse class="m1" cx="200" cy="268" rx="11" ry="5" fill="#6e2620"/><ellipse class="m2" cx="200" cy="271" rx="6" ry="2" fill="#e07a6e"/></g>
+      <path d="M200 251 C190 247 176 249 168 259 C180 255 190 256 200 257 Z" fill="#1f1c25"/>
+      <path d="M200 251 C210 247 224 249 232 259 C220 255 210 256 200 257 Z" fill="#1f1c25"/>
+      <path d="M194 287 C196 301 204 301 206 287 C202 290 198 290 194 287 Z" fill="#1f1c25"/>
+    </g>
+  </g>
+</svg>
+</template>
+
+<script src="agent.js"></script>
+<script>window.LOCAL_CONFIG = null;</script>
+<script src="config.js" onerror="void 0"></script>
+<script>
+(function () {
+  "use strict";
+  var A = window.AGENT, V = A.voice || {};
+  var PRESETS = {
+    ark:      { url: "https://ark.cn-beijing.volces.com/api/v3/chat/completions", model: "doubao-seed-2-0-mini-260215" },
+    deepseek: { url: "https://api.deepseek.com/chat/completions", model: "deepseek-chat" },
+    qwen:     { url: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions", model: "qwen-plus" },
+    custom:   { url: "", model: "" }
+  };
+  var TTS_URL = "https://openspeech.bytedance.com/api/v3/tts/unidirectional";
+  var STORE = "agent-cfg-v1";
+  var $ = function (id) { return document.getElementById(id); };
+
+  // 配置优先级：本机浏览器里存的 > 同目录 config.js（只给本地拷贝用，不要上传到网上）> 默认
+  function loadCfg() {
+    var c = null;
+    try { c = JSON.parse(localStorage.getItem(STORE) || "null"); } catch (e) {}
+    if (!c && window.LOCAL_CONFIG) c = window.LOCAL_CONFIG;
+    c = c || {};
+    var p = PRESETS[c.prov] ? c.prov : "ark";
+    return { prov: p, url: c.url || PRESETS[p].url, model: c.model || PRESETS[p].model, key: c.key || "", noThink: !!c.noThink,
+             voiceOn: c.voiceOn !== false, ttsKey: c.ttsKey || "", ttsUrl: c.ttsUrl || TTS_URL, speaker: c.speaker || V.speaker || "" };
+  }
+  var cfg = loadCfg();
+  function saveCfg() { try { localStorage.setItem(STORE, JSON.stringify(cfg)); } catch (e) {} }
+  function canSpeak() { return cfg.voiceOn && !!cfg.ttsKey && !!cfg.speaker; }
+
+  /* ---------- 人物：矢量李白，或 agent.js 里配的三张立绘 ---------- */
+  var Hero = (function () {
+    var box = $("hero"), h = A.hero || {}, api = {};
+    if (h.idle) {
+      document.body.classList.add("imghero");
+      var wrap = document.createElement("div"); wrap.className = "imgs";
+      var im = {};
+      ["idle", "talk", "blink"].forEach(function (k) {
+        if (!h[k]) return;
+        im[k] = document.createElement("img"); im[k].src = h[k]; im[k].alt = ""; wrap.appendChild(im[k]);
+      });
+      box.appendChild(wrap);
+      var cur = "";
+      var show = function (k) { if (!im[k]) k = "idle"; if (k === cur) return; cur = k; for (var n in im) im[n].className = n === k ? "on" : ""; };
+      var mouth = 0, shut = false;
+      show("idle");
+      api.mouth = function (v) { mouth = v; show(shut ? "blink" : (v > .16 ? "talk" : "idle")); };
+      api.eyes = function (s) { shut = s; show(s ? "blink" : (mouth > .16 ? "talk" : "idle")); };
+    } else {
+      box.appendChild($("libaiSvg").content.cloneNode(true));
+      var svg = box.querySelector("svg"), smile = svg.querySelector(".smile"), mg = svg.querySelector(".mouth"),
+          m1 = svg.querySelector(".m1"), m2 = svg.querySelector(".m2"), eo = svg.querySelector(".eyes-open"), es = svg.querySelector(".eyes-shut");
+      api.mouth = function (v) {
+        if (v < .06) { smile.style.display = ""; mg.style.display = "none"; return; }
+        smile.style.display = "none"; mg.style.display = "";
+        var ry = 2 + v * 11; m1.setAttribute("ry", ry); m1.setAttribute("cy", 263 + ry * .6);
+        m2.setAttribute("cy", 263 + ry * 1.05); m2.setAttribute("ry", Math.max(1, ry * .35));
+      };
+      api.eyes = function (s) { eo.style.display = s ? "none" : ""; es.style.display = s ? "" : "none"; };
+    }
+    (function blinkLoop() {
+      setTimeout(function () { api.eyes(true); setTimeout(function () { api.eyes(false); blinkLoop(); }, 140); }, 2200 + Math.random() * 3200);
+    })();
+    return api;
+  })();
+
+  /* ---------- 嘴型：有声音时跟音量走，没声音时按时间假装说话 ---------- */
+  var actx = null, analyser = null, level = 0, fakeUntil = 0, tbuf = null;
+  function audio() {
+    if (!actx) {
+      var C = window.AudioContext || window.webkitAudioContext;
+      actx = new C(); analyser = actx.createAnalyser(); analyser.fftSize = 1024; analyser.connect(actx.destination);
+      tbuf = new Float32Array(analyser.fftSize);
+    }
+    if (actx.state === "suspended") actx.resume();
+    return actx;
+  }
+  var playing = false;
+  (function mouthLoop() {
+    var target = 0, now = performance.now();
+    if (playing && analyser) {
+      analyser.getFloatTimeDomainData(tbuf);
+      var s = 0; for (var i = 0; i < tbuf.length; i++) s += tbuf[i] * tbuf[i];
+      target = Math.min(1, Math.max(0, (Math.sqrt(s / tbuf.length) - .015) * 9));
+    } else if (now < fakeUntil) {
+      target = .45 + .4 * Math.sin(now / 55) * Math.sin(now / 137);
+    }
+    level += (target - level) * (target > level ? .6 : .35);
+    Hero.mouth(level);
+    document.body.classList.toggle("talking", level > .05 || playing || now < fakeUntil);
+    requestAnimationFrame(mouthLoop);
+  })();
+
+  /* ---------- 页面文字 ---------- */
+  document.title = "和" + A.name + "聊一聊";
+  $("title").textContent = A.title; $("tag").textContent = A.tag; $("q").placeholder = A.placeholder;
+  $("send").textContent = A.sendText; $("foot").textContent = A.footer;
+  A.chips.forEach(function (t) {
+    var b = document.createElement("button"); b.type = "button"; b.className = "chip"; b.textContent = t;
+    b.onclick = function () { ask(t); }; $("chips").appendChild(b);
+  });
+  var bubble = $("bubble"), history = [], busy = false, lastText = A.welcome;
+
+  function say(text, opts) {
+    opts = opts || {};
+    bubble.className = opts.err ? "err" : "";
+    void bubble.offsetWidth; if (opts.pop) bubble.className += " pop";
+    bubble.textContent = text;
+    if (opts.cursor) { var c = document.createElement("span"); c.className = "cursor"; bubble.appendChild(c); }
+    if (opts.replay) { var r = document.createElement("span"); r.className = "replay"; r.textContent = canSpeak() ? "点我再说一遍" : ""; bubble.appendChild(r); }
+    bubble.scrollTop = bubble.scrollHeight;
+  }
+  function thinking() { bubble.className = "pop"; bubble.innerHTML = '<span class="thinking"><i></i><i></i><i></i></span>'; }
+  function setAsked(t) { var a = $("asked"); a.querySelector("span").textContent = t; a.className = t ? "on" : ""; }
+  function setBusy(b) {
+    busy = b; $("send").disabled = b;
+    Array.prototype.forEach.call(document.querySelectorAll(".chip"), function (c) { c.disabled = b; });
+  }
+  function clean(s) { return s.replace(/\*\*|__|^#+\s*/gm, "").replace(/^\s*[-*]\s+/gm, ""); }
+  function refreshVoiceBtn() { $("voiceBtn").textContent = cfg.voiceOn ? "🔊" : "🔇"; $("voiceBtn").className = "tool" + (canSpeak() ? "" : " dim"); }
+  function addHist(q, a) {
+    var d = document.createElement("div"); d.className = "q"; d.textContent = "问：" + q;
+    var p = document.createElement("p"); p.className = "a"; p.textContent = A.name + "：" + a;
+    $("hist").appendChild(d); $("hist").appendChild(p);
+  }
+
+  say(A.welcome, { pop: true, replay: true });
+  refreshVoiceBtn();
+
+  /* ---------- 说话队列：大模型一边出字，一边按句子送去合成，按顺序播放；字幕跟着声音一句句出 ---------- */
+  function Speaker() {
+    var q = [], shown = "", done = false, idle = null, self = this, running = false;
+    this.text = function () { return shown; };
+    this.push = function (sentence) {
+      var item = { text: sentence, p: tts(sentence).then(function (ab) { return audio().decodeAudioData(ab); }) };
+      item.p.catch(function () {});
+      q.push(item); if (!running) next();
+    };
+    this.finish = function () { done = true; return new Promise(function (res) { idle = res; check(); }); };
+    function check() { if (done && !running && !q.length && idle) { idle(); idle = null; } }
+    function reveal(t, secs, cb) {
+      var base = shown, i = 0, step = Math.max(30, secs * 900 / Math.max(1, t.length));
+      (function tick() { i++; say(base + t.slice(0, i), { cursor: i < t.length }); if (i < t.length) setTimeout(tick, step); else { shown = base + t; if (cb) cb(); } })();
+    }
+    function next() {
+      if (!q.length) { running = false; playing = false; check(); return; }
+      running = true;
+      var it = q.shift();
+      it.p.then(function (buf) {
+        var src = actx.createBufferSource(); src.buffer = buf; src.connect(analyser);
+        playing = true; src.onended = function () { playing = false; next(); };
+        src.start(); reveal(it.text, buf.duration);
+      }).catch(function (e) {
+        self.failed = e;
+        var secs = Math.min(8, .2 * it.text.length); fakeUntil = performance.now() + secs * 1000;
+        reveal(it.text, secs * .6, function () { setTimeout(next, secs * 400); });
+      });
+    }
+  }
+  // 按中文句读切句；太短的并到下一句，免得一个字一个字地合成
+  function Splitter(onSentence) {
+    var full = "", sent = 0;
+    this.feed = function (text) {
+      full = text;
+      var rest = full.slice(sent), re = /[。！？!?；;…\n]+[”」』）)]?/g, m, cut = 0;
+      while ((m = re.exec(rest)) !== null) {
+        var end = m.index + m[0].length;
+        if (end - cut >= 8) { emit(rest.slice(cut, end)); cut = end; }
+      }
+      sent += cut;
+    };
+    this.flush = function () { emit(full.slice(sent)); sent = full.length; };
+    function emit(s) { s = s.replace(/^\s+/, ""); if (s.trim()) onSentence(s); }
+  }
+
+  function tts(text) {
+    var id = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2);
+    var url = cfg.ttsUrl + (cfg.ttsUrl.indexOf("?") < 0 ? "?" : "&") + "api_key=" + encodeURIComponent(cfg.ttsKey);
+    var body = { user: { uid: "agent" }, req_params: { text: text, speaker: cfg.speaker,
+                 audio_params: { format: "mp3", sample_rate: 24000, speech_rate: V.rate || 0 },
+                 additions: JSON.stringify(V.style ? { context_texts: [V.style] } : {}) } };
+    return fetch(url, { method: "POST", headers: { "Content-Type": "application/json", "X-Api-Resource-Id": "seed-tts-2.0", "X-Api-Request-Id": id }, body: JSON.stringify(body) })
+      .then(function (r) {
+        return r.text().then(function (t) {
+          if (!r.ok) { var e = new Error(t.slice(0, 160)); e.status = r.status; throw e; }
+          var parts = [], n = 0;
+          t.split("\n").forEach(function (ln) {
+            ln = ln.trim(); if (!ln) return;
+            var d; try { d = JSON.parse(ln); } catch (e) { return; }
+            if (d.code && d.code !== 20000000) { var e2 = new Error(d.message || ("code " + d.code)); e2.status = d.code; throw e2; }
+            if (d.data) { var bin = atob(d.data), u = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); parts.push(u); n += u.length; }
+          });
+          if (!n) throw new Error("没有返回声音");
+          var all = new Uint8Array(n), o = 0; parts.forEach(function (u) { all.set(u, o); o += u.length; });
+          return all.buffer;
+        });
+      });
+  }
+
+  // 说一段现成的话（开场白、再说一遍）
+  function speakText(text) {
+    if (busy) return;
+    if (!canSpeak()) { fakeUntil = performance.now() + Math.min(6000, text.length * 180); return; }
+    audio(); setBusy(true);
+    var sp = new Speaker(), sl = new Splitter(function (s) { sp.push(s); });
+    say("", { pop: true }); sl.feed(text); sl.flush();
+    sp.finish().then(function () { say(text, { replay: true }); voiceNote(sp); setBusy(false); });
+  }
+  bubble.onclick = function () { if (!busy && lastText) speakText(lastText); };
+
+  /* ---------- 提问 ---------- */
+  $("form").onsubmit = function (e) { e.preventDefault(); ask($("q").value); };
+  function ask(text) {
+    text = (text || "").trim();
+    if (!text || busy) return;
+    $("q").value = ""; setAsked(text);
+    if (!cfg.key) { say("我还没收到老师给的“钥匙”，暂时说不了话。请老师点右上角的齿轮，填一下大模型的 API Key。", { pop: true, err: true }); return; }
+    var voice = canSpeak(); if (voice) audio();
+    setBusy(true); thinking(); document.body.classList.add("thinking");
+    var sp = voice ? new Speaker() : null, sl = voice ? new Splitter(function (s) { sp.push(s); }) : null, first = true;
+    var msgs = [{ role: "system", content: A.system }].concat(history.slice(-A.history * 2), [{ role: "user", content: text }]);
+    chat(msgs, function (part) {
+      if (first) { first = false; document.body.classList.remove("thinking"); if (!voice) bubble.className = "pop"; }
+      part = clean(part);
+      if (voice) sl.feed(part); else { say(part, { cursor: true }); fakeUntil = performance.now() + 400; }
+    }).then(function (full) {
+      full = clean(full).trim() || "嗯……我一时想不起来，你再问我一次好吗？";
+      history.push({ role: "user", content: text }, { role: "assistant", content: full });
+      addHist(text, full); lastText = full;
+      if (!voice) { say(full, { replay: true }); return; }
+      sl.flush();
+      return sp.finish().then(function () { say(full, { replay: true }); voiceNote(sp); });
+    }).catch(function (err) {
+      say(friendly(err), { err: true });
+    }).then(function () { document.body.classList.remove("thinking"); setBusy(false); });
+  }
+  function voiceNote(sp) { if (sp && sp.failed) $("foot").textContent = "声音没出来：" + friendly(sp.failed, true) + "　·　" + A.footer; else $("foot").textContent = A.footer; }
+
+  function friendly(err, voice) {
+    var s = String(err && err.status || ""), m = String(err && err.message || err);
+    if (s === "401" || s === "403" || /45000000|permission|auth/i.test(s + m)) return voice ? "语音钥匙不对或没开通语音合成 2.0" : "老师给的钥匙好像不对，我进不去门。请老师点齿轮检查 API Key。";
+    if (s === "404") return "找不到这位模型先生。请老师点齿轮检查“模型名称”。（" + m + "）";
+    if (s === "429") return "问我的人太多啦，我歇一口气，过几秒再问我吧。";
+    if (!s) return voice ? "网络不通" : "山里云雾太大，信没送出去。请检查一下网络，再问我一次。";
+    return "出了点小状况（" + s + "）：" + m;
+  }
+
+  // 流式调用 OpenAI 兼容接口；豆包默认关掉深度思考，回答更快。不认识这个参数的模型自动去掉重试。
+  function chat(messages, onPart) {
+    var body = { model: cfg.model, messages: messages, stream: true, temperature: A.temperature, max_tokens: A.maxTokens };
+    var think = cfg.prov === "ark" && !cfg.noThink;
+    if (think) body.thinking = { type: "disabled" };
+    return fetch(cfg.url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + cfg.key },
+      body: JSON.stringify(body)
+    }).then(function (r) {
+      if (!r.ok) return r.text().then(function (t) {
+        var msg = t; try { var j = JSON.parse(t); msg = (j.error && (j.error.message || j.error.code)) || j.message || t; } catch (e) {}
+        if (think && r.status === 400 && /thinking/i.test(msg)) { cfg.noThink = true; saveCfg(); return chat(messages, onPart); }
+        var e2 = new Error(String(msg).slice(0, 160)); e2.status = r.status; throw e2;
+      });
+      return readStream(r, onPart);
+    });
+  }
+  function readStream(r, onPart) {
+    var reader = r.body.getReader(), dec = new TextDecoder("utf-8"), buf = "", full = "";
+    function pump() {
+      return reader.read().then(function (res) {
+        if (res.done) return full;
+        buf += dec.decode(res.value, { stream: true });
+        var lines = buf.split("\n"); buf = lines.pop();
+        lines.forEach(function (ln) {
+          ln = ln.trim();
+          if (ln.indexOf("data:") !== 0) return;
+          var d = ln.slice(5).trim();
+          if (d === "[DONE]") return;
+          try {
+            var j = JSON.parse(d), delta = j.choices && j.choices[0] && j.choices[0].delta;
+            if (delta && delta.content) { full += delta.content; onPart(full); }
+          } catch (e) {}
+        });
+        return pump();
+      });
+    }
+    return pump();
+  }
+
+  /* ---------- 工具栏、设置 ---------- */
+  $("voiceBtn").onclick = function () { cfg.voiceOn = !cfg.voiceOn; saveCfg(); refreshVoiceBtn(); };
+  $("histBtn").onclick = function () { $("drawer").className = "drawer on"; };
+  $("histClose").onclick = function () { $("drawer").className = "drawer"; };
+  function fill() {
+    $("prov").value = cfg.prov; $("url").value = cfg.url; $("model").value = cfg.model; $("key").value = cfg.key;
+    $("voiceOn").checked = cfg.voiceOn; $("ttsKey").value = cfg.ttsKey; $("speaker").value = cfg.speaker; $("ttsUrl").value = cfg.ttsUrl; $("st").textContent = "";
+  }
+  function read() {
+    var p = $("prov").value;
+    if (p !== cfg.prov) cfg.noThink = false;
+    cfg.prov = p; cfg.url = $("url").value.trim(); cfg.model = $("model").value.trim(); cfg.key = $("key").value.trim();
+    cfg.voiceOn = $("voiceOn").checked; cfg.ttsKey = $("ttsKey").value.trim(); cfg.speaker = $("speaker").value.trim(); cfg.ttsUrl = $("ttsUrl").value.trim() || TTS_URL;
+  }
+  $("gear").onclick = function () { fill(); $("mask").className = "mask on"; };
+  $("close").onclick = function () { $("mask").className = "mask"; };
+  $("prov").onchange = function () { var p = PRESETS[$("prov").value]; $("url").value = p.url; $("model").value = p.model; };
+  $("save").onclick = function () { read(); saveCfg(); refreshVoiceBtn(); $("st").textContent = "已保存。"; };
+  $("clear").onclick = function () { history = []; $("hist").innerHTML = ""; setAsked(""); lastText = A.welcome; say(A.welcome, { pop: true, replay: true }); $("mask").className = "mask"; };
+  $("test").onclick = function () {
+    read(); $("st").textContent = "正在连接大模型……"; audio();
+    var t0 = Date.now();
+    chat([{ role: "system", content: A.system }, { role: "user", content: "用一句话跟同学们打个招呼。" }], function () {})
+      .then(function (full) {
+        saveCfg(); refreshVoiceBtn();
+        var line = "大模型连通了（" + ((Date.now() - t0) / 1000).toFixed(1) + " 秒）。\n" + A.name + "：" + clean(full);
+        $("st").textContent = line;
+        if (!canSpeak()) return;
+        $("st").textContent = line + "\n正在试声音……";
+        return tts(clean(full)).then(function (ab) { return actx.decodeAudioData(ab); }).then(function (buf) {
+          var src = actx.createBufferSource(); src.buffer = buf; src.connect(analyser); playing = true;
+          src.onended = function () { playing = false; }; src.start();
+          $("st").textContent = line + "\n声音也通了，已保存。";
+        }).catch(function (e) { $("st").textContent = line + "\n声音没通：" + friendly(e, true); });
+      })
+      .catch(function (e) { $("st").textContent = "大模型没连上：" + friendly(e); });
+  };
+  document.addEventListener("keydown", function (e) {
+    if (e.ctrlKey && e.key === ",") $("gear").click();
+    if (e.key === "Escape") { $("close").click(); $("histClose").click(); }
+  });
+})();
+</script>
+</body>
+</html>
